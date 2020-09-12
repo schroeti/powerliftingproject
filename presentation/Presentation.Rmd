@@ -1,0 +1,1344 @@
+---
+title: "Powerlifting competitions"
+author: "Rita Sefraoui Tahiri & Alexandre Schroeter"
+date: "31 May 2019"
+output: ioslides_presentation
+---
+ 
+```{r setup, warning = FALSE, message = FALSE, echo=FALSE }
+library(knitr)
+library(tidyverse)
+library(lubridate)
+library(modelr)
+library(broom)
+library(ggrepel)
+library(forcats)
+library(here)
+library(gtools)
+library(kableExtra)
+library(magrittr)
+library(caret)
+library(readr)
+library(RColorBrewer)
+library(dplyr)
+library(gridExtra)
+library(ggplot2)
+library(sf)
+library(hms)
+library(scales)
+library(arm)
+library(naniar)
+library(ggmap)
+library(tmaptools)
+library(utf8)
+library(dplyr)
+library(lubridate)
+library(stringr)
+library(tidyr)
+#library(tally)
+library(forecast)
+library(caret)
+library(devtools)
+library(plotly)
+library(car)
+library(DT)
+library(shiny)
+library(jpeg)
+
+options(encoding="utf-8")
+
+theme_set(theme_bw())
+knitr::opts_chunk$set(fig.align = "center", message = FALSE)
+```
+
+## A short introduction
+
+<center> 
+![A visual representation of the lifts](../data/sbd.jpg)
+</center>
+<br>
+**Wilks coefficient**
+<p align='justify'>The Wilks Coefficient or Wilks Formula is a coefficient that can be used to measure the strength of a powerlifter against other powerlifters despite the different weights of the lifters. It is given by the following formula:  </p>
+$$Coeff = \frac{500}{a + bx + cx^2 + dx^3 + ex^4 + fx^5}$$
+
+
+```{r , warning = FALSE, message = FALSE, echo=FALSE , results='hide', include=FALSE}
+meetings<-read.csv("../data/meets.csv", sep=",")
+ 
+meetings%>%
+  head()%>%
+  kable(digits = 1,
+        caption = "Powerlifting meetings raw data",
+        format="html",
+        align = 'c')%>%
+  kable_styling(bootstrap_options = c("striped"), 
+                full_width = T, 
+                font_size= 12)%>%
+  scroll_box(width = "700px", height = "300px")
+
+```
+
+```{r , warning = FALSE, message = FALSE, echo=FALSE , results='hide', include=FALSE}
+str(meetings)
+
+meetings$Date <- as.Date(meetings$Date, format = "%Y-%m-%d")
+meetings$MeetTown <- as.character(meetings$MeetTown)
+
+meetings <- meetings %>%
+  filter(complete.cases(MeetTown)) %>%
+  mutate(MeetTown = str_trim(MeetTown)) %>%
+  mutate(location = paste(MeetTown, MeetCountry, sep = ", "))
+```
+
+```{r , warning=FALSE, message=FALSE, echo=FALSE, results='hide', include=FALSE}
+meetings%>%
+  head()%>%
+  kable(digits = 1,
+        caption = "Powerlifting meetings clean data",
+        format="html",
+        align = 'c')%>%
+  kable_styling(bootstrap_options = c("striped"), 
+                full_width = T, 
+                font_size= 12)%>%
+  scroll_box(width = "700px", height = "300px")
+
+meets<-meetings %>%
+  dplyr::select(MeetID, MeetName , Date , Federation , MeetPath)
+
+meets$Date<-ymd(meets$Date)
+
+```
+
+```{r , warning = FALSE, message = FALSE, echo=FALSE , include=FALSE, results='hide'}
+
+##We import the database and make the implicit NA explicit
+powerlifters<-read.csv("../data/openpowerlifting.csv", sep=",", na.strings=c(""," ","NA", "NaN", "nan", "N/A", "na"))
+
+##View of what it looks like 
+
+powerlifters%>%
+  head()%>%
+  kable(digits = 1,
+        caption = "Powerlifters raw data",
+        format="html",
+        align = 'c')%>%
+  kable_styling(bootstrap_options = c("striped"), 
+                full_width = T, 
+                font_size= 12)%>%
+  scroll_box(width = "700px", height = "300px")
+```
+
+```{r , warning=FALSE, message=FALSE, echo=FALSE, results='hide', include=FALSE}
+powerlifters%>%
+  head()%>%
+  kable(digits = 1,
+        caption = "Powerlifters raw data",
+        format="html",
+        align = 'c')%>%
+  kable_styling(bootstrap_options = c("striped"), 
+                full_width = T, 
+                font_size= 12)%>%
+  scroll_box(width = "700px", height = "300px")
+```
+
+```{r , warning = FALSE, message = FALSE, echo=FALSE , results='hide', include=FALSE}
+
+powerlifters$Equipment<-as.factor(powerlifters$Equipment)
+powerlifters$Sex<-as.factor(powerlifters$Sex)
+powerlifters<-powerlifters[!is.na(powerlifters[,"WeightClassKg"]), ]
+powerlifters<-powerlifters[powerlifters$Age>=17, ]
+powerlifters<-powerlifters[powerlifters$Age <= 75, ]
+
+## Age process
+powerliftersrep<-powerlifters%>%
+  dplyr::select(Name, Age)%>%
+  filter( is.na(Age)==TRUE)%>%
+  group_by(Name)
+
+namewithage<-powerlifters%>%
+  dplyr::select(Name, Age)%>%
+  filter(is.na(Age)==FALSE)%>%
+  group_by(Name)
+
+x<-namewithage%>%
+  inner_join(powerliftersrep, by="Name")
+
+x<-x[!duplicated(x),]
+
+meets$Date=ymd(meets$Date)
+dates<- meets%>%
+  dplyr::select(MeetID, Date)%>%
+  group_by(MeetID)
+
+y<-dates%>%
+  right_join(powerlifters, by="MeetID")
+
+powerlifters<-y
+
+Names<-powerlifters%>%
+  dplyr::select(Name, Age, Date )%>%
+  filter(is.na(Age)==FALSE)%>%
+  group_by(Name)
+
+Names<-Names%>%
+  mutate(Year_of_Birth = as.numeric(year(Date))- Age)
+
+Names<-Names[,-c(1,3,4)]
+### Taking off duplicates. 
+
+Names<-Names[!duplicated(Names),]
+Names$Year_of_Birth<-as.factor(Names$Year_of_Birth)
+Names<-Names[!duplicated(Names$Name),]
+
+### Join by name
+z<-Names%>%
+  right_join(powerlifters, by= "Name")
+
+powerlifters<-z
+
+powerlifters<-powerlifters[!is.na(powerlifters$Year_of_Birth),]
+
+rm(namewithages,namewithage,nameswithnoage, Names, x,y,z, dates,powerliftersminor,powerliftersrep)
+
+### Delete column age, and redo it 
+powerlifters<-powerlifters[,-7]
+
+### recalculate age
+powerlifters<-powerlifters%>%
+  mutate(yearofcompetition=as.numeric(year(Date)))
+
+powerlifters<-powerlifters%>%
+  mutate(Age=( yearofcompetition- as.numeric(as.character(Year_of_Birth))))
+
+## We select the columns we are interested in 
+powerlifters<-powerlifters %>%
+  dplyr::select( MeetID, Name, Date, Year_of_Birth, Age, Sex, BodyweightKg, WeightClassKg, Equipment, BestSquatKg, BestBenchKg, BestDeadliftKg, Wilks) 
+
+powerlifters%>%
+  head()%>%
+  kable(digits = 1,
+        caption = "Powerlifters clean data",
+        format="html",
+        align = 'c')%>%
+  kable_styling(bootstrap_options = c("striped"), 
+                full_width = T, 
+                font_size= 12)%>%
+  scroll_box(width = "700px", height = "300px")
+
+```
+
+```{r , warning = FALSE, message = FALSE, echo=FALSE , results='hide', include=FALSE}
+
+meets<-meetings %>%
+  dplyr::select(MeetID, MeetName , Date , Federation , MeetPath)
+
+meets$Date<-ymd(meets$Date)
+
+PowerliftersMeet<-meets%>%right_join(powerlifters, by=c("MeetID"))
+
+PowerliftersMeet<-PowerliftersMeet[!duplicated(PowerliftersMeet),]
+PowerliftersMeet<-PowerliftersMeet[PowerliftersMeet$Age>17,]
+PowerliftersMeet<-PowerliftersMeet[PowerliftersMeet$Age<75,]
+
+PowerliftersMeet%>% 
+  head()%>%
+  kable(digits = 1,
+        caption = "Fusionned powerlifting tables, clean data",
+        format="html",
+        align = 'c')%>%
+  kable_styling(bootstrap_options = c("striped"), 
+                full_width = T, 
+                font_size= 12)%>%
+  scroll_box(width = "700px", height = "300px")
+```
+
+```{r , warning = FALSE, message = FALSE, echo=FALSE , results='hide', include=FALSE}
+# insta <- read_csv("data/insta.csv")
+# insta2 <- read_csv("data/insta2.csv")
+# insta3 <- read_csv("data/insta3.csv")
+# 
+# #selection of column of interest
+# insta <- insta %>%
+#   bind_rows(insta2) %>%
+#   bind_rows(insta3) %>%
+#   dplyr::select(query) %>%
+#   mutate(query = substring(query,27)) %>%
+#   mutate(query = as.factor(query)) %>%
+#   group_by(query) %>%
+#   count() %>%
+#   arrange(desc(n))
+# View(insta)
+# 
+# write.csv(insta, "instagrampl.csv")
+
+follow <- read_csv("../data/instagrampl.csv")
+ldsi <- read_csv("../data/lifter-data_social-instagram.csv")
+
+
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, results='hide',include=FALSE}
+#Best Squat, Bench and Deadlift
+powerbsd <- powerlifters %>%
+  dplyr::group_by(Name, Sex) %>%
+  dplyr::summarise(BestSquat = max(BestSquatKg, na.rm = T),
+            BestBench = max(BestBenchKg, na.rm = T),
+            BestDeadlift = max(BestDeadliftKg, na.rm = T)) %>%
+  filter(BestSquat > 0, BestBench >0, BestDeadlift >0)%>%
+  as_tibble()
+
+
+powerbsd_stat <- 
+  powerbsd %>%
+  dplyr::group_by(Sex) %>%
+  dplyr::summarise(mean_S = mean(BestSquat, na.rm = T),
+                   median_S = median(BestSquat, na.rm = T), 
+                   mean_B = mean(BestBench, na.rm = T), 
+                   median_B = median(BestBench, na.rm = T), 
+                   mean_D = mean(BestDeadlift, na.rm = T),
+                   median_D = median(BestDeadlift, na.rm = T)
+                   )%>%
+  as_tibble()
+
+
+
+pl_age <- powerlifters %>%
+  filter(Date > '2018-01-01' & Date < '2018-12-31')
+
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, results='hide', include=FALSE}
+powerbsd%>%
+  head()%>%
+  kable(digits = 1,
+        caption = "Best squats, bench and deadlifts",
+        format="html",
+        align = 'c')%>%
+  kable_styling(bootstrap_options = c("striped"), 
+                full_width = T, 
+                font_size= 12)%>%
+  scroll_box(width = "700px", height = "300px")
+
+
+powerbsd_stat%>%
+  head()%>%
+  kable(digits = 1,
+        caption = "Lifters statistics in kg",
+        format="html",
+        align = 'c', 
+        col.names = c("Gender", 
+                      "Mean squat", 
+                      "Median squat", 
+                      "Mean benchpress",
+                      "Median benchpress",
+                      "Mean deadlift", 
+                      "Median deadlift")
+        ) %>%
+  kable_styling(bootstrap_options = c("striped"), 
+                full_width = T,
+                font_size= 12)
+
+```
+
+##Demographics
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+#gender
+gender1<-ggplot(powerlifters, aes(Sex)) +
+  geom_bar() +
+  xlab("Gender") +
+  ylab("Count") +
+  ggtitle("Number of male and female powerlifters")+
+  theme_minimal()+
+  theme(plot.title = element_text(hjust = 0.5))
+
+#Equipment
+gender2<-ggplot(powerlifters, aes(x= Equipment,  group=Sex)) + 
+  geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") +
+  geom_text(aes( label = scales::percent(..prop..),
+                 y= ..prop.. ), stat= "count", vjust = -.5) +
+  labs(y = "Percent", fill="Equipment") +
+  facet_grid(~Sex) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal()+
+  theme(legend.title = element_blank(), legend.position = "none")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+grid.arrange(gender1, gender2, ncol=2)
+```
+
+---
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, results='hide', include=FALSE}
+#BestSquat
+Squat<-ggplot(powerbsd, aes(x = BestSquat, fill = Sex)) + 
+  geom_histogram( position = "dodge", binwidth = 5) +
+  scale_fill_hue(labels = c("Female", "Male")) +
+  labs(x = "Best Squat in kg", y = "Frequency", fill = "Gender") +
+  ggtitle("Distribution of squat 1RM across gender")+
+  theme_minimal()+
+  theme(plot.title = element_text(hjust = 0.5))
+  
+  
+ 
+#BestBench
+Bench<-ggplot(powerbsd, aes(x = BestBench, fill = Sex)) + 
+  geom_histogram( position = "dodge", binwidth = 5) +
+  scale_fill_hue(labels = c("Female", "Male")) +
+  labs(x = "Best Benchpress in kg", y = "Frequency", fill = "Gender") +
+  ggtitle("Distribution of benchpress 1RM across gender") +
+  theme_minimal()+
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+#BestDeadlift
+Deadlift<-ggplot(powerbsd, aes(x = BestDeadlift, fill = Sex)) + 
+  geom_histogram( position = "dodge", binwidth = 5) +
+  scale_fill_hue(labels = c("Female", "Male")) +
+  labs(x = "Best Deadlift in kg", y = "Frequency", fill = "Gender") +
+  ggtitle("Distribution of deadlift 1RM across gender") +
+  theme_minimal()+
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, include=FALSE, results='hide'}
+# #Interactive boxplots
+ a <- ggplot(powerbsd, aes(x = Sex)) +
+  geom_boxplot(aes(y = BestSquat))+
+  coord_flip() +
+  ggtitle("Best squat per gender")+
+  theme_minimal()+
+  theme(plot.title = element_text(hjust = 0.5))
+
+ ggplotly(a)
+
+
+b <- ggplot(powerbsd, aes(x = Sex)) +
+  geom_boxplot(aes(y = BestBench))+
+  coord_flip()+
+  ggtitle("Best bench per gender")+
+  theme_minimal()+
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+ggplotly(b)
+
+c <- ggplot(powerbsd, aes(x = Sex)) +
+  geom_boxplot(aes(y = BestDeadlift))+
+  coord_flip()+
+  ggtitle("Best squat per gender")+
+  theme_minimal()+
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+ggplotly(c)
+
+
+
+#Distribution of age for 2018 competitions
+
+Agedist<-ggplot(pl_age, aes(x = Age, fill = Sex)) +
+  geom_histogram(position = "dodge", binwidth = 1) +
+  labs(x = "Age in years", y = "Frequency", fill = "Gender") +
+  ggtitle("Distribution of age across gender in 2018") +
+  scale_fill_hue(labels = c("Female", "Male")) +
+  theme_minimal()+
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+
+#Distribution of bodyweight for 2018 competitions
+
+year2<-ggplot(pl_age, aes(x = BodyweightKg, fill = Sex)) +
+  geom_histogram(position = "dodge", binwidth = 1) +
+  labs(x = "Bodyweight in kg", y = "Frequency", fill = "Gender") +
+  ggtitle("Distribution of bodyweight across gender in 2018") +
+  theme_minimal() +
+  scale_fill_manual(values = c("orange", "blue"),  labels = c("Female", "Male"))+
+    theme(plot.title = element_text(hjust = 0.5))
+
+
+#Distribution of wilks for 2018 competitions
+
+year3<-ggplot(pl_age, aes(x = Wilks)) +
+  geom_histogram(binwidth = 0.2, fill="black") +
+  scale_fill_hue(labels = c("Female", "Male")) +
+  labs(x = "Wilks", y = "Frequency") +
+  ggtitle("Distribution of Wilks (normalized strength) in 2018") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+grid.arrange(Squat,Bench,Deadlift,Agedist, ncol=2)
+#grid.arrange( year2, year3, ncol=2,top=" year 2018 analysis")
+```
+ 
+```{r, warning=FALSE, message=FALSE, echo=FALSE, results='hide', include=FALSE}
+wilkpoints<- PowerliftersMeet[,c("Age","Sex","BodyweightKg","Wilks")]%>%
+  filter(Age>17, Age<75)%>%
+  as_tibble()
+
+wilkpoints<-wilkpoints[!is.na(wilkpoints[ ,"Wilks"]) , ]
+
+# wilkpoints %>% 
+#   dplyr::select( Wilks, BodyweightKg, Age , Sex )%>%
+#   dplyr::group_by(Sex )%>%
+#   ggplot(aes( x='BodyweightKg', y='Wilks', color=Sex))+ 
+#   geom_point(mapping=aes(x=BodyweightKg, y=Wilks),size=0.05)+
+#   ggtitle("Wilk points per body weight and per sex ")+
+#   xlab(" BodyweightinKg") +
+#   ylab(" Mean Wilk points")+
+#   theme_minimal()+
+#   ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, results='hide', include=FALSE}
+
+weightsmales<-wilkpoints %>%
+  dplyr::select(BodyweightKg, Sex)%>%
+  dplyr::filter( Sex== 'M') %>%
+  dplyr::mutate(weightasfactor=as.factor(ceiling(BodyweightKg)))%>%
+  dplyr::group_by('weightasfactor')%>%
+  ggplot( )+
+  geom_bar( aes(x= weightasfactor))+
+  ggtitle("Weight in males ")+
+  theme_minimal()+
+  xlab("Body weight in Kg")+
+  ylab("Number of weightlifters")+
+  ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))+
+  scale_x_discrete("weight", breaks=c("0", "30", "60", "90", "120", "150", "180", "200"),labels=c("0", "30", "60", "90", "120", "150", "180", "200") )
+
+weightsM<-wilkpoints %>%
+  dplyr::select(BodyweightKg, Sex)%>%
+  filter( Sex=='M') %>%
+  mutate(weightasfactor=as.factor(ceiling(BodyweightKg)))
+
+frequencyWeightM<- plyr::count(weightsM$weightasfactor)%>%
+  as_tibble()
+
+
+weightsfemales<-wilkpoints %>%
+  dplyr::select(BodyweightKg, Sex)%>%
+  dplyr::filter( Sex== 'F') %>%
+  dplyr::mutate(weightasfactor=as.factor(ceiling(BodyweightKg)))%>%
+  dplyr::group_by('weightasfactor')%>%
+  ggplot( )+
+  geom_bar( aes(x= weightasfactor))+
+  ggtitle("Weight in females ")+
+  theme_minimal()+
+  xlab("Body weight in Kg")+
+  ylab("Number of weightlifters")+
+  ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))+
+  scale_x_discrete("weight", breaks=c("0", "20", "40", "60", "80", "100", "120", "140", "160"),labels=c("0", "20", "40", "60", "80", "100", "120", "140", "160") )
+
+ # grid.arrange(weightsmales, weightsfemales, ncol=2, top="Weight distributions of both genders")
+
+weightsF<-wilkpoints %>%
+  dplyr::select(BodyweightKg, Sex)%>%
+  filter( Sex=='F') %>%
+  mutate(weightasfactor=as.factor(ceiling(BodyweightKg)))
+
+frequencyWeightF<- plyr::count(weightsF$weightasfactor)%>%
+  as_tibble()
+
+frequencyWeightM[order(-frequencyWeightM$freq), ]%>% 
+  head()%>%
+  kable(digits = 1,
+        caption = "More frequent weights in males",
+        format="html",
+        align = 'c',
+        col.names = c("Weights", "Frequency"))%>%
+  kable_styling(bootstrap_options = c("striped"), 
+                full_width = T, 
+                font_size= 12)%>%
+  scroll_box(width = "700px", height = "300px")
+
+frequencyWeightF[order(-frequencyWeightF$freq), ]%>% 
+  head()%>%
+  kable(digits = 1,
+        caption = "More frequent weights in females",
+        format="html",
+        align = 'c',
+        col.names = c("Weights", "Frequency"))%>%
+  kable_styling(bootstrap_options = c("striped"), 
+                full_width = T, 
+                font_size= 12)%>%
+  scroll_box(width = "700px", height = "300px")
+
+wilkpoints %>%
+  dplyr::select(Age, Wilks, Sex)%>%
+  filter( Sex== 'M', Age>17, Age<75) %>%
+  mutate(Ageasfactor=as.factor(ceiling(Age)))%>%
+  group_by(Ageasfactor)%>%
+  ggplot( aes(Ageasfactor,Wilks))+
+  geom_boxplot()+
+  ggtitle("Wilks in males ")+
+  theme_minimal()+
+  xlab("Age")+
+  ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))+
+  scale_x_discrete("Age", 
+                   breaks=c("17", "20", "25", "30", "35", "40", "45", "50", "55","60","65","70","75"), 
+                   labels=c("17", "20", "25", "30", "35", "40", "45", "50", "55","60","65","70","75") )
+
+
+wilkpoints %>%
+  dplyr::select(Age, Wilks, Sex)%>%
+  filter( Sex== 'F', Age>17, Age<75) %>%
+  mutate(Ageasfactor=as.factor(ceiling(Age)))%>%
+  group_by(Ageasfactor)%>%
+  ggplot( aes(Ageasfactor,Wilks))+
+  geom_boxplot()+
+  ggtitle("Wilks in females ")+
+  theme_minimal()+
+  xlab("Age")+
+  ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))+
+  scale_x_discrete("Age", 
+                   breaks=c("17", "20", "25", "30", "35", "40", "45", "50", "55","60","65","70","75"),
+                   labels=c("17", "20", "25", "30", "35", "40", "45", "50", "55","60","65","70","75"))
+  
+
+
+
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, results='hide', include=FALSE}
+Squat1<-PowerliftersMeet%>%
+  dplyr::select(BestSquatKg,BodyweightKg, Sex)%>%
+  dplyr::group_by ( BodyweightKg ,Sex )%>%
+  dplyr::summarise(Mean = mean(BestSquatKg, na.omit=T) )%>%
+  ggplot(aes( x='BodyWeightKg ', y='Mean', color=Sex))+ 
+  geom_line(mapping=aes(x=BodyweightKg, y=Mean))+
+  ggtitle(" Mean Best Squat per gender and bodyweight")+
+  xlab(" Bodyweight in kg ") +
+  ylab(" Best Squat")+
+  theme_minimal()+
+  ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))
+
+Bench1<-PowerliftersMeet%>%
+  dplyr::select(BestBenchKg,BodyweightKg, Sex)%>%
+  dplyr::group_by ( BodyweightKg ,Sex )%>%
+  dplyr::summarise(mean = mean(BestBenchKg, na.omit=T) )%>%
+  ggplot(aes( x='BodyweightKg', y='mean', color=Sex))+ 
+  geom_line(mapping=aes(x=BodyweightKg, y=mean))+
+  ggtitle(" Mean Best bench per gender and bodyweight")+
+  xlab(" Bodyweight in kg ") +
+  ylab(" Best Bench")+
+  theme_minimal()+
+  ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))
+
+Deadlift1<-PowerliftersMeet%>%
+  dplyr::select(BestDeadliftKg,BodyweightKg, Sex)%>%
+  dplyr::group_by ( BodyweightKg ,Sex )%>%
+  dplyr::summarise(mean = mean(BestDeadliftKg, na.omit=T) )%>%
+  ggplot(aes( x='BodyweightKg', y='mean', color=Sex))+ 
+  geom_line(mapping=aes(x=BodyweightKg, y=mean))+
+  ggtitle(" Mean Best deadlift per gender and bodyweight")+
+  xlab(" Bodyweight in kg ") +
+  ylab(" Best deadlift")+
+  theme_minimal()+
+  ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))
+
+grid.arrange(Squat1,Bench1,Deadlift1,ncol=1)
+
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, results='hide', include=FALSE}
+wilkpointsEntire<-wilkpoints
+wilkpointsEntire$Age<-as.integer(wilkpointsEntire$Age)
+
+wilkpointsEntireMale<-wilkpointsEntire%>%
+  filter(Sex=='M')
+
+wilkpointsEntireFemale<-wilkpointsEntire%>%
+  filter(Sex=='F')
+
+
+geo1<-read.csv("../data/geo/geo1.csv", sep=",", na.strings = "")
+geo2<-read.csv("../data/geo/geo2.csv", sep=",", na.strings = "")
+geo3<-read.csv("../data/geo/geo3.csv", sep=",", na.strings = "")
+geo4<-read.csv("../data/geo/geo4.csv", sep=",", na.strings = "")
+geo5<-read.csv("../data/geo/geo5.csv", sep=",", na.strings = "")
+geo6<-read.csv("../data/geo/geo6.csv", sep=",", na.strings = "")
+geo7<-read.csv("../data/geo/geo7.csv", sep=",", na.strings = "")
+geo8<-read.csv("../data/geo/geo8.csv", sep=",", na.strings = "")
+geo9<-read.csv("../data/geo/geo9.csv", sep=",", na.strings = "")
+geo10<-read.csv("../data/geo/geo10.csv", sep=",", na.strings = "")
+geo11<-read.csv("../data/geo/geo11.csv", sep=",", na.strings = "")
+geo12<-read.csv("../data/geo/geo12.csv", sep=",", na.strings = "")
+geo13<-read.csv("../data/geo/geo13.csv", sep=",", na.strings = "")
+geo14<-read.csv("../data/geo/geo14.csv", sep=",", na.strings = "")
+
+geo <- bind_rows(geo1, geo2, geo3, geo4, geo5, geo6, geo7, geo8, geo9, geo10, geo11, geo12, geo13, geo14)
+
+dplyr::rename(geo, MeetTown = query)
+
+geo_joined <- inner_join(meetings, geo, by = c("location" = "query"))
+         
+geo_joined <- geo_joined %>%
+  distinct(MeetID, .keep_all = T)
+
+geo_final <- geo_joined %>%
+  dplyr::select(MeetTown, MeetState, MeetCountry, location,  lat, lon) %>%
+  dplyr::rename(latitude = lat, longitude = lon) 
+
+#world
+map <- ggmap::get_stamenmap( bbox = c(left = -170, bottom = -60, right = 180, top = 80), zoom = 3, maptype = "toner-lite")
+ggmap(map)
+
+
+#USA
+bbox_us <- c(left = -125, bottom = 25, right = -65, top = 50)
+us <- get_stamenmap(bbox_us, zoom = 5, maptype = "toner-lite")
+ggmap(us)
+
+#USA
+geo_us <- geo_final %>%
+  filter(MeetCountry == "USA")
+
+```
+
+## Locations
+**We want to see where most competitions take place: **
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+#World
+
+ggmap(map) + 
+  geom_point(data = geo_final,
+             aes(x = longitude, y = latitude),
+             color = "orange") +
+  labs(x = "Longitude", 
+       y = "Latitude",
+       title = "Locations of powerlifting competitions around the world")+
+  theme_minimal()+
+  ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))
+``` 
+
+##USA
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+ggmap(us) + 
+  geom_point(data = geo_us,
+             aes(x = longitude,y = latitude), 
+             shape = 17, 
+             color = "blue") +
+  labs(x = "Longitude", 
+       y = "Latitude",
+       title = "Locations of powerlifting competitions in the USA")+
+  theme_minimal()+
+  ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))
+
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, results='hide', include=FALSE}
+
+PowerliftersMeet<-PowerliftersMeet[PowerliftersMeet$Age>17,]
+PowerliftersMeet<-PowerliftersMeet[PowerliftersMeet$Age<75,]
+
+p<-PowerliftersMeet%>%
+  dplyr::select(Federation, Wilks, BestSquatKg, BestBenchKg, BestDeadliftKg)%>%
+  dplyr::group_by(Federation)%>%
+  dplyr::summarise(meanWilks=mean(Wilks, na.rm=T)%>%round(2), 
+                   meanSquat=mean(BestSquatKg, na.rm=T)%>%round(2),
+                   meanBench=mean(BestBenchKg, na.rm=T)%>%round(2),
+                   meanDeadlift=mean(BestDeadliftKg, na.rm=T)%>%round(2))%>%
+  as_tibble()
+
+datatable(p, options = list(), class = "display",
+          callback = JS("return table;"), colnames=c("Federation", "Wilks", "Squat", "Bench", "Deadlift"),
+          caption = "Mean weights for each exercise per federation", filter = c("none", "bottom", "top"), escape = TRUE,
+          style = "default", width = NULL, height = NULL, elementId = NULL,
+          fillContainer = getOption("DT.fillContainer", NULL),
+          autoHideNavigation = getOption("DT.autoHideNavigation", NULL),
+          selection = c("multiple", "single", "none"), extensions = list(),
+          plugins = NULL, editable = FALSE)
+
+
+# 
+# PowerliftersMeet%>%
+#   dplyr::select(Federation, Wilks, BestSquatKg, BestBenchKg, BestDeadliftKg)%>%
+#   dplyr::group_by(Federation)%>%
+#   dplyr::summarise(meanWilks=mean(Wilks, na.rm=T), 
+#                    meanSquat=mean(BestSquatKg, na.rm=T),
+#                    meanBench=mean(BestBenchKg, na.rm=T),
+#                    meanDeadlift=mean(BestDeadliftKg, na.rm=T))%>%
+#   ggplot(aes(x=Federation))+
+#   geom_point(aes(y=meanSquat, color="Blue"))+
+#   geom_point(aes(y=meanBench, color="Green"))+
+#   geom_point(aes(y=meanDeadlift, color="Black"))+
+#   ylab("Kg lifted")+
+#   ggtitle("Mean best squat, best deadlift and best bench")+
+#   theme_minimal()+
+#   theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+#    scale_color_identity(name = "Exercise",
+#                           breaks = c("Blue", "Green", "Black"),
+#                           labels = c("Mean best squat kg ", 
+#                                      "Mean best bench Kg", 
+#                                      "Mean best deadlift Kg"),
+#                           guide = "legend")+
+#    ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))
+  
+  
+
+
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, results='hide', include=FALSE}
+# PowerliftersMeet%>%
+#   dplyr::select(Federation)%>%
+#   dplyr::group_by(Federation)%>%
+#   ggplot(aes(x=Federation))+
+#   geom_bar()+
+#   ggtitle("Number of participations per federation")+
+#   theme_minimal()+
+#   theme(axis.text.x = element_text(angle = 90, hjust = 1))
+# 
+# plyr::count(PowerliftersMeet$Federation)%>%
+#   as_tibble%>%
+#   kable(digits = 1,
+#         caption = "More popular federations",
+#         format="html",
+#         align = 'c',
+#         col.names = c("Federations", "Frequency"))%>%
+#   kable_styling(bootstrap_options = c("striped"), 
+#                 full_width = T, 
+#                 font_size= 12)%>%
+#   scroll_box(width = "700px", height = "300px")
+
+  
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, results='hide', include=FALSE}
+r<-PowerliftersMeet%>%
+  dplyr::select(Federation, Wilks, BestSquatKg, BestBenchKg, BestDeadliftKg)%>%
+  dplyr::filter(Federation %in% c("IPF", "PA", "USAPL", "USPA"))%>%
+  dplyr::group_by(Federation)%>%
+  dplyr::summarise(meanWilks=mean(Wilks, na.rm=T)%>%round(2), 
+                   meanSquat=mean(BestSquatKg, na.rm=T)%>%round(2),
+                   meanBench=mean(BestBenchKg, na.rm=T)%>%round(2),
+                   meanDeadlift=mean(BestDeadliftKg, na.rm=T)%>%round(2))%>%
+  as_tibble()
+
+datatable(r, options = list(), class = "display",
+          callback = JS("return table;"), colnames=c("Federation", "Wilks", "Squat", "Bench", "Deadlift"),
+          caption = "Mean weights for each exercise per federation", filter = c("none", "bottom", "top"), escape = TRUE,
+          style = "default", width = NULL, height = NULL, elementId = NULL,
+          fillContainer = getOption("DT.fillContainer", NULL),
+          autoHideNavigation = getOption("DT.autoHideNavigation", NULL),
+          selection = c("multiple", "single", "none"), extensions = list(),
+          plugins = NULL, editable = FALSE)
+
+```
+
+```{r ,  warning=FALSE, message=FALSE, echo=FALSE,results='hide',include=FALSE}
+
+Names<-PowerliftersMeet$Name%>%plyr::count()
+Names<-Names[Names$freq>40,]
+
+
+AnalyseProgression <- function(Athlete) {
+  g1<-Athlete%>%
+    dplyr::select(BestSquatKg, Wilks, BestBenchKg, BestDeadliftKg, Date.x)%>%
+    ggplot(aes(x=Date.x))+
+    geom_point(aes(y=BestSquatKg), color="green") +
+    geom_smooth(aes(y=BestSquatKg), color="green")+
+    ggtitle("Best Squat progression")+
+    xlab(" Date") +
+    ylab(" Best Squat in Kg ")+
+    theme_minimal()+
+    ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))
+  
+  
+  g2<-Athlete%>%
+    dplyr::select(BestSquatKg, Wilks, BestBenchKg, BestDeadliftKg, Date.x)%>%
+    ggplot(aes(x=Date.x))+
+    geom_point(aes(y=BestBenchKg), color="black") +
+    geom_smooth(aes(y=BestBenchKg), color="black")+
+    ggtitle("Best Bench progression")+
+    xlab(" Date") +
+    ylab("Best Bench in Kg")+
+    theme_minimal()+
+    ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))
+  
+  g3<- Athlete%>%
+    dplyr::select(BestSquatKg, Wilks, BestBenchKg, BestDeadliftKg, Date.x)%>%
+    ggplot(aes(x=Date.x))+
+    geom_point(aes(y=BestDeadliftKg), color="blue")+
+    geom_smooth(aes(y=BestDeadliftKg), color="blue")+
+    ggtitle("Best Deadlift progression")+
+    xlab(" Date") +
+    ylab("Best Deadlift in Kg")+
+    theme_minimal()+
+    ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))
+  
+  
+  g4<-Athlete%>%
+    dplyr::select(BestSquatKg, Wilks, BestBenchKg, BestDeadliftKg, Date.x)%>%
+    ggplot(aes(x=Date.x))+ 
+    geom_point(aes(y=Wilks), color="red") +
+    geom_smooth(aes(y=Wilks), color="red")+
+    ggtitle("Wilks progression")+
+    xlab(" Date") +
+    ylab("Wilks")+
+    theme_minimal()+
+    ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))
+  
+  
+  grid.arrange(g1,g2,g3,g4, ncol=2, top=as.character(Athlete$Name))
+  
+}  
+
+
+```
+
+```{r, warning=FALSE, message=FALSE , echo=FALSE, results='hide', include=FALSE }
+
+Names<-
+  as_tibble%>%
+  head()%>%
+  kable(digits = 1,
+        caption = "Powerlifters that compete the most ",
+        format="html",
+        align = 'c'#,
+        #col.names = c("Powerlifter's name", "Participations ") 
+        ) %>%
+  kable_styling(bootstrap_options = c("striped"), 
+                full_width = T, 
+                font_size= 12)%>%
+  scroll_box(width = "300px", height = "300px")
+
+```
+
+```{r ,  warning=FALSE, message=FALSE, echo=FALSE,results='hide',include=FALSE}
+
+AlanAerts<-PowerliftersMeet[PowerliftersMeet$Name=="Alan Aerts",]
+BonnieAerts<-PowerliftersMeet[PowerliftersMeet$Name=="Bonnie Aerts",]
+Nickilanson<-PowerliftersMeet[PowerliftersMeet$Name=="Nicki I'Anson",]
+BetsySpann<-PowerliftersMeet[PowerliftersMeet$Name=="Betsy Spann",]
+AprilShumaker<-PowerliftersMeet[PowerliftersMeet$Name=="April Shumaker",]
+
+
+
+Analysis<-function(Athlete){
+  
+  myAthlete<- tibble("Name"=Athlete$Name,
+                     "number of competitions"= Athlete%>%nrow(),
+                     "Number of federations"=Athlete$Federation%>%plyr::count()%>%nrow(), 
+                     "Years competed"=Athlete$Date.x%>%year()%>%plyr::count()%>%nrow(),
+                     "First year of competition"=Athlete$Date.x%>%year()%>%min(),
+                     "Last year of competition"=Athlete$Date.x%>%year()%>%max(), 
+                     "Age for first competition"=Athlete$Age%>%min,
+                     "Age for last competition"= Athlete$Age%>%max)
+  
+  return(myAthlete[1,])
+}
+
+
+```
+
+```{r,warning=FALSE, message=FALSE, echo=FALSE , results='hide', include=FALSE}
+
+rbind(Analysis(AlanAerts),
+      Analysis(BetsySpann), 
+      Analysis(AprilShumaker), 
+      Analysis(Nickilanson),
+      Analysis(BonnieAerts))%>%
+  as_tibble%>%
+  kable(digits = 1,
+        caption = "Powerlifters that compete the most ",
+        format="html",
+        align = 'c')%>%
+  kable_styling(bootstrap_options = c("striped"), 
+                full_width = T, 
+                font_size= 12)%>%
+  scroll_box(width = "700px", height = "300px")
+
+
+invisible(lapply(list(Nickilanson, BetsySpann, AprilShumaker, AlanAerts, BonnieAerts) , AnalyseProgression))
+
+```
+
+##Instagram
+
+```{r,warning=FALSE, message=FALSE, echo=FALSE , results='hide', include=FALSE}
+
+db1 <- follow %>%
+  inner_join(ldsi, by = c("query" = "Instagram")) %>%
+  select(Name, n) %>%
+  inner_join(powerlifters, by = c("Name")) %>%
+  group_by(Name, Sex) %>%
+  summarise(n = max(n, na.rm = T),
+    BestSquat = max(BestSquatKg, na.rm = T),
+            BestBench = max(BestBenchKg, na.rm = T),
+            BestDeadlift = max(BestDeadliftKg, na.rm = T),
+    Wilks = max(Wilks, na.rm = T)) %>%
+  filter(BestSquat > 0, BestBench >0, BestDeadlift >0, n > 5) %>%
+  arrange(desc(n)) %>%
+  rename(followers = n) %>%
+  as_tibble()
+
+
+f1 <- ggplot(db1, aes(x = BestSquat,y = followers, color = Sex)) +
+  geom_point() +
+  labs(x = "Best squat in kg", y = "Number of followers on Instagram", title = "Relationship between best squat \n and number of followers on instagram") +
+  scale_color_discrete(name = "Gender",
+                       labels = c("Female", "Male"))+
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  
+  
+
+f2 <- ggplot(db1, aes(x = BestBench,y = followers, color = Sex)) +
+  geom_point()+
+  labs(x = "Best bench in kg", y = "Number of followers on Instagram", title = "Relationship between best benchpress \n and number of followers on instagram") +
+  scale_color_discrete(name = "Gender", labels = c("Female", "Male"))+
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+f3 <- ggplot(db1, aes(x = BestDeadlift,y = followers, color = Sex)) +
+  geom_point() +
+  labs(x = "Best deadlift in kg", y = "Number of followers on Instagram",title = "Relationship between best deadlift \n and number of followers on instagram")+
+  scale_color_discrete(name = "Gender", labels = c("Female", "Male"))+
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+f4 <- ggplot(db1, aes(x = Wilks, y = followers, color = Sex)) +
+  geom_point() +
+  labs(x = "Wilks coefficient in points", y = "Number of followers on Instagram", title = "Relationship between wilks  \n and number of followers on instagram")+
+  scale_color_discrete(name = "Gender", labels = c("Female", "Male"))+
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+```{r,warning=FALSE, message=FALSE, echo=FALSE }
+#ggplotly(f1)
+#ggplotly(f2)
+#ggplotly(f3)
+ggplotly(f4)
+```
+
+```{r , warning=FALSE, message=FALSE, echo=FALSE, include=FALSE, results='hide'}
+wilkweightM1<-wilkpointsEntire%>%
+  dplyr::filter(Sex=='M')%>%
+  dplyr::select(Wilks, BodyweightKg)%>%
+  dplyr::mutate( fact= as_factor(ceiling(BodyweightKg)))%>%
+  dplyr::group_by(fact)%>%
+  dplyr::summarise(mean=mean(Wilks, na.rm=TRUE))
+
+wilkweightM2<-wilkpointsEntire%>%
+  dplyr::filter(Sex=='M')%>%
+  dplyr::select(Wilks, BodyweightKg)%>%
+  dplyr::mutate( fact= as_factor(ceiling(BodyweightKg)))%>%
+  dplyr::group_by(fact)
+
+ggplot(wilkweightM2,mapping=aes(x=fact, y=Wilks ))+
+  geom_boxplot()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  theme_minimal()+
+  ggtitle("Wilk points per body weight for males")+
+  ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))+
+  ylab("wilk points")+
+  scale_x_discrete("Body weight in Kg", 
+                   breaks=c("40", "40", "50", "60", "70", "80", "90", "100","110","120","130","140","150","160","170","180","190","200"),
+                   labels=c( "40", "40", "50", "60", "70", "80", "90", "100","110","120","130","140","150","160","170","180","190","200"))
+  
+ggplot(wilkweightM1,mapping=aes(x=fact, y=mean))+
+  geom_point()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  ggtitle("Mean wilk points per body weight for males")+
+  theme_minimal()+
+  ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))+
+  ylab("wilk points")+
+  scale_x_discrete("Body weight in Kg", 
+                   breaks=c("40", "40", "50", "60", "70", "80", "90", "100","110","120","130","140","150","160","170","180","190","200"),
+                   labels=c( "40", "40", "50", "60", "70", "80", "90", "100","110","120","130","140","150","160","170","180","190","200"))
+  
+```
+
+```{r , warning=FALSE, message=FALSE, echo=FALSE, include=FALSE, results='hide'}
+wilkweightF1<-wilkpointsEntire%>%
+  dplyr::filter(Sex=='F')%>%
+  dplyr::select(Wilks, BodyweightKg)%>%
+  dplyr::mutate( fact= as_factor(ceiling(BodyweightKg)))%>%
+  dplyr::group_by(fact)%>%
+  dplyr::summarise(mean=mean(Wilks, na.rm=TRUE))
+
+wilkweightF2<-wilkpointsEntire%>%
+  dplyr::filter(Sex=='F')%>%
+  dplyr::select(Wilks, BodyweightKg)%>%
+  dplyr::mutate( fact= as_factor(ceiling(BodyweightKg)))%>%
+  dplyr::group_by(fact)
+
+ggplot(wilkweightF2,mapping=aes(x=fact, y=Wilks ))+
+  geom_boxplot()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  ggtitle("Wilk points per body weight for females")+
+  theme_minimal()+
+  ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))+
+  ylab("wilk points")+
+  scale_x_discrete("Body weight in Kg", 
+                   breaks=c("30", "40", "40", "50", "60", "70", "80", "90", "100","110","120","130","140","150","160","170","180","190"),
+                   labels=c("30", "40", "40", "50", "60", "70", "80", "90", "100","110","120","130","140","150","160","170","180","190"))
+  
+ggplot(wilkweightF1,mapping=aes(x=fact, y=mean))+
+  geom_point()+
+  theme_minimal()+
+  ggtitle("Mean wilk points per body weight for females")+
+  ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))+
+  ylab("wilk points")+
+  scale_x_discrete("Body weight in Kg ", 
+                   breaks=c("30", "40", "40", "50", "60", "70", "80", "90", "100","110","120","130","140","150","160","170","180","190"),
+                   labels=c("30", "40", "40", "50", "60", "70", "80", "90", "100","110","120","130","140","150","160","170","180","190"))
+```
+
+```{r , warning=FALSE, message=FALSE, echo=FALSE, results='hide', include=FALSE}
+
+dull_model <- lm(Wilks ~ Age, data = wilkpointsEntireMale)
+
+predictions <- wilkpointsEntireMale %>% data_grid(Age, Wilks)
+
+predictions <- predictions %>% add_predictions(dull_model)
+
+tidy(dull_model) %>% 
+  kable(digits = 1,
+        caption = "Dull model",
+        format="html",
+        align = 'c')%>%
+  kable_styling(bootstrap_options = c("striped"), 
+                full_width = T,
+                font_size= 12)
+
+wilkpointsEntireMale %>% 
+  dplyr::select( Age, Wilks)%>%
+  dplyr::group_by(Age) %>%
+  dplyr::summarise(median = median(Wilks)) %>%
+  ggplot(aes(x = Age, y = median)) +
+  geom_point() +
+  geom_line(data = predictions, aes(y = pred), color = "red", size=1.5) +
+  labs(x = "Age", y = "Median of wilks for males", title = "Predicted wilks points per age for males")+
+  theme_minimal()+
+  ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))
+
+```
+
+##We try a polynomial model of degree 6
+
+```{r , warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+poly_model <- lm(Wilks ~ poly(Age,6), data = wilkpointsEntireMale)
+
+predictions <- wilkpointsEntireMale %>% data_grid(Age, Wilks)
+
+predictions <- predictions %>% add_predictions(poly_model)
+
+tidy(poly_model)%>%
+  kable(digits = 1,
+        caption = "Polynomial model of order 6 for predicting Wilk points depending on the age of a male powerlifter",
+        format="html",
+        align = 'c')%>%
+  kable_styling(bootstrap_options = c("striped"), 
+                full_width = T,
+                font_size= 12)
+```
+
+```{r , warning=FALSE, message=FALSE, echo=FALSE}
+wilkpointsEntireMale %>% 
+  dplyr::select( Age, Wilks)%>%
+  dplyr::group_by(Age) %>%
+  dplyr::summarise(mean = mean(Wilks)) %>%
+  ggplot(aes(x = Age, y = mean)) +
+  geom_point() +
+  geom_line(data = predictions, aes(y = pred), color = "red", size=1.5) +
+  labs(x = "Age", y = "Mean of wilks for males", title = "Predicted wilks points per age for males")+
+  theme_minimal()+
+  ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))
+
+```
+
+```{r , warning=FALSE, message=FALSE, echo=FALSE, include=FALSE, results='hide'}
+dull_model <- lm(Wilks ~ Age, data = wilkpointsEntireFemale)
+
+predictions <- wilkpointsEntireFemale %>% data_grid(Age, Wilks)
+
+predictions <- predictions %>% add_predictions(dull_model)
+
+tidy(dull_model) %>% 
+  kable(digits = 1,
+        caption = "Dull model",
+        format="html",
+        align = 'c')%>%
+  kable_styling(bootstrap_options = c("striped"), 
+                full_width = T,
+                font_size= 12)
+
+
+wilkpointsEntireFemale %>% 
+  dplyr::select( Age, Wilks)%>%
+  dplyr::group_by(Age) %>%
+  dplyr::summarise(median = median(Wilks)) %>%
+  ggplot(aes(x = Age, y = median)) +
+  geom_point() +
+  geom_line(data = predictions, aes(y = pred), color = "red", size=1.5) +
+  labs(x = "Age", y = "Median of wilks for males", title = "Predicted wilks points per age for females")+
+  theme_minimal()+
+  ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))
+
+```
+
+```{r , warning=FALSE, message=FALSE, echo=FALSE, results='hide', include=FALSE}
+poly_model <- lm(Wilks ~ poly(Age,5), data = wilkpointsEntireFemale)
+
+predictions <- wilkpointsEntireFemale %>% data_grid(Age, Wilks)
+
+predictions <- predictions %>% add_predictions(poly_model)
+
+tidy(poly_model)%>%
+  kable(digits = 1,
+        caption = "Polynomial model of order 5 for predicting Wilk points depending on the Age of female powerlifters",
+        format="html",
+        align = 'c')%>%
+  kable_styling(bootstrap_options = c("striped"), 
+                full_width = T,
+                font_size= 12)
+
+wilkpointsEntireFemale %>% 
+  dplyr::select( Age, Wilks)%>%
+  dplyr::group_by(Age) %>%
+  dplyr::summarise(mean = mean(Wilks)) %>%
+  ggplot(aes(x = Age, y = mean)) +
+  geom_point() +
+  geom_line(data = predictions, aes(y = pred), color = "red", size=1.5) +
+  labs(x = "Age", y = "Mean of wilks for females", title = "Predicted wilks points per age for females")+
+  theme_minimal()+
+  ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5))
+
+```
+
+```{r , warning=FALSE, message=FALSE, echo=FALSE, include=FALSE, results='hide'}
+power_ml <- powerlifters %>%
+  dplyr:: select(Age, Sex, BodyweightKg, BestSquatKg, BestBenchKg, BestDeadliftKg, Wilks) %>%
+  na.omit() %>%
+  mutate(Sex = as.numeric(Sex == "F"))
+
+power_ml_sbd <- power_ml %>%
+  dplyr::select(BestSquatKg, BestBenchKg, BestDeadliftKg)
+
+
+#Creating train set and test set for squat
+intraining_squat <-  createDataPartition(power_ml$BestSquatKg, p = .75, list = F)
+train_squat <- power_ml[intraining_squat,]
+test_squat <- power_ml[-intraining_squat, ]
+
+
+library(car)
+
+vif(lm(BestSquatKg ~Wilks + Sex + BodyweightKg + Age, data = train_squat))
+vif(lm(BestDeadliftKg ~Wilks + Sex + BodyweightKg + Age, data = train_squat))
+vif(lm(BestBenchKg ~Wilks + Sex + BodyweightKg + Age, data = train_squat))
+
+set.seed(1993)
+
+fitControl <- trainControl(## 5-fold CV
+  method = "repeatedcv",
+  number = 2,
+  repeats = 2)
+
+
+
+###LM
+
+#Squat
+lmfit_squat <- train(BestSquatKg ~ Age + Sex + BodyweightKg + Wilks, 
+                data = train_squat, 
+                method =  "lm",  
+                trControl = fitControl, 
+                verbose = F
+                )
+
+lm_pred_squat <- predict(lmfit_squat, test_squat)
+
+
+postResample(lm_pred_squat, test_squat$BestSquatKg)
+
+
+#Deadlift
+lmfit_dead <- train(BestDeadliftKg ~ Age + Sex + BodyweightKg + Wilks, 
+                     data = train_squat, 
+                     method =  "lm",  
+                     trControl = fitControl, 
+                     verbose = F
+)
+
+lm_pred_dead <- predict(lmfit_dead, test_squat)
+
+postResample(lm_pred_dead, test_squat$BestDeadliftKg)
+
+#Bench
+lmfit_bench <- train(BestBenchKg ~ Age + Sex + BodyweightKg + Wilks, 
+               data = train_squat, 
+               method =  "lm",  
+               trControl = fitControl, 
+               verbose = F
+)
+
+lm_pred_bench <- predict(lmfit_bench, test_squat)
+
+postResample(lm_pred_bench, test_squat$BestBenchKg)
+
+
+# 
+# > ###GAM
+# > #Squat
+# > mygamgrid <- data.frame()
+# > 
+# > gamfit_squat <- train(BestSquatKg ~ Age + Sex + BodyweightKg + Wilks, 
+# +                      data = train_squat, 
+# +                      method =  "gam",  
+# +                      trControl = fitControl, 
+# +                      verbose = F
+# + )
+# > 
+# > gam_pred_squat <- predict(gamfit_squat, test_squat)
+# > 
+# > postResample(gam_pred_squat, test_squat$BestSquatKg)
+#       RMSE   Rsquared        MAE 
+# 17.8948335  0.9345175 12.9568444 
+# > 
+# > 
+# > 
+# > 
+# > #Deadlift
+# > gamfit_dead <- train(BestDeadliftKg ~ Age + Sex + BodyweightKg + Wilks, 
+# +                     data = train_squat, 
+# +                     method =  "gam",  
+# +                     trControl = fitControl, 
+# +                     verbose = F
+# + )
+# > 
+# > gam_pred_dead <- predict(gamfit_dead, test_squat)
+# > 
+# > postResample(gam_pred_dead, test_squat$BestDeadliftKg) 
+#       RMSE   Rsquared        MAE 
+# 17.7043619  0.9156218 13.1337536 
+# > #Bench
+# > gamfit_bench <- train(BestBenchKg ~ Age + Sex + BodyweightKg + Wilks, 
+# +                      data = train_squat, 
+# +                      method =  "gam",  
+# +                      trControl = fitControl, 
+# +                      verbose = F
+# + )
+# > 
+# > gam_pred_bench <- predict(gamfit_bench, test_squat)
+# > 
+# > postResample(gam_pred_bench, test_squat$BestBenchKg)
+#       RMSE   Rsquared        MAE 
+# 16.5901111  0.8963846 12.1376012 
+
+
+```
+##Thank you for listening!
+
+
+
